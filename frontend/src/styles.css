@@ -1,0 +1,33 @@
+﻿:root {
+  --bg: #edf4ff;
+  --panel: #ffffff;
+  --text: #12274d;
+  --accent: #4f89f8;
+  --accent-2: #44b9ec;
+  --line: #d4e2ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "HarmonyOS Sans SC", "Alibaba PuHuiTi 3.0", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 2% 8%, rgba(73, 175, 230, 0.21) 0%, transparent 28%),
+    radial-gradient(circle at 88% -5%, rgba(84, 131, 228, 0.22) 0%, transparent 34%),
+    linear-gradient(180deg, #f7fbff 0%, var(--bg) 100%);
+}
+
+#app {
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
