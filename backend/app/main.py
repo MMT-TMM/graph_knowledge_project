@@ -15,7 +15,7 @@ from app.schemas import (
     QAResponse,
     SourceSummary,
 )
-from app.services.graph_store import list_graphs, load_graph
+from app.services.graph_store import ensure_graph_index, list_graphs, load_graph
 from app.services.qa import answer_with_graph
 
 app = FastAPI(title="Heritage KG Builder", version="1.1.0")
@@ -50,12 +50,14 @@ def get_graph_detail(graph_id: str) -> GraphDetailResponse:
 
     item = next((g for g in list_graphs() if g["id"] == graph_id), None)
     if item is None:
+        meta = graph_data.get("__meta", {}) if isinstance(graph_data, dict) else {}
         item = {
             "id": graph_id,
             "name": Path(graph_id).stem,
             "json_output": str(Path("output") / graph_id),
             "created_at": "",
             "size": 0,
+            "model_name": str(meta.get("model_name", "")) if isinstance(meta, dict) else "",
         }
 
     return GraphDetailResponse(graph=GraphItem(**item), data=graph_data)
@@ -76,11 +78,12 @@ def qa_with_graph(req: QARequest) -> QAResponse:
 
     try:
         qa_result = answer_with_graph(
+            graph_id=req.graph_id,
             graph_data=graph_data,
             question=question,
-            model_name=req.model_name,
+            fallback_model_name=req.model_name,
             api_key=req.api_key,
-            base_url=req.base_url,
+            fallback_base_url=req.base_url,
             qa_prompt=req.qa_prompt,
         )
     except Exception as exc:
@@ -91,7 +94,9 @@ def qa_with_graph(req: QARequest) -> QAResponse:
         question=question,
         answer=qa_result["answer"],
         mode=qa_result["mode"],
+        used_model=qa_result.get("used_model", ""),
         evidence=qa_result["evidence"],
+        retrieval_stats=qa_result.get("retrieval_stats", {}),
         context_preview=qa_result.get("context_preview", ""),
     )
 
@@ -155,6 +160,11 @@ async def extract_knowledge_graph(
         relative_output_path = str(output_path)
 
     resolved_graph_name = (graph_name or "").strip() or output_path.stem
+    try:
+        ensure_graph_index(graph_id)
+    except Exception:
+        # 索引构建失败不阻断抽取主流程，问答时会按需重建索引
+        pass
 
     return ExtractResponse(
         request_id=uuid4().hex,

@@ -99,4 +99,5 @@ class QAResponse(BaseModel):
     mode: str
     used_model: str = ""
     evidence: list[QAEvidence] = Field(default_factory=list)
+    retrieval_stats: dict[str, Any] = Field(default_factory=dict)
     context_preview: str = ""
