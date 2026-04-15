@@ -1,4 +1,5 @@
 ﻿from app.graph.workflow import run_kg_workflow
+from app.services.qa import answer_with_graph
 
 
 def test_pipeline_rule_based_extract_and_validate():
@@ -6,14 +7,40 @@ def test_pipeline_rule_based_extract_and_validate():
 
     result = run_kg_workflow(
         text=text,
-        image_bytes=None,
-        pdf_bytes=None,
+        image_bytes_list=[],
+        pdf_bytes_list=[],
         model_name="gpt-4.1-mini",
         api_key=None,
         base_url=None,
+        custom_prompt=None,
+        graph_name="",
     )
 
     assert result["entities"]
     assert result["relations"]
     relation_types = {r["type"] for r in result["relations"]}
     assert relation_types.issubset({"hasDefect", "hasMaterial", "occurredAt", "affected", "causedBy"})
+
+
+def test_qa_rule_mode():
+    graph_data = {
+        "entities": [
+            {"id": "E001", "name": "柱子", "type": "ArchitecturalComponent"},
+            {"id": "E002", "name": "裂缝", "type": "Defect"},
+        ],
+        "triples": [
+            {"subject": "柱子", "predicate": "hasDefect", "object": "裂缝"},
+        ],
+    }
+
+    result = answer_with_graph(
+        graph_data=graph_data,
+        question="柱子有什么病害？",
+        model_name="gpt-4.1-mini",
+        api_key=None,
+        base_url=None,
+        qa_prompt=None,
+    )
+
+    assert result["mode"] == "rule"
+    assert "柱子" in result["answer"]

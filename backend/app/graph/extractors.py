@@ -7,7 +7,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from app.graph.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
+from app.graph.prompts import DEFAULT_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 COMPONENTS = [
     "地基",
@@ -54,6 +54,7 @@ def llm_extract(
     model_name: str,
     api_key: str,
     base_url: str | None = None,
+    custom_prompt: str | None = None,
 ) -> dict[str, Any]:
     llm = ChatOpenAI(
         model=model_name,
@@ -64,7 +65,7 @@ def llm_extract(
 
     response = llm.invoke(
         [
-            SystemMessage(content=SYSTEM_PROMPT),
+            SystemMessage(content=(custom_prompt or "").strip() or DEFAULT_SYSTEM_PROMPT),
             HumanMessage(content=USER_PROMPT_TEMPLATE.format(text=text)),
         ]
     )

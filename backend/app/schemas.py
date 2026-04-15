@@ -44,11 +44,15 @@ class SourceSummary(BaseModel):
     input_text_chars: int
     image_provided: bool
     pdf_provided: bool
+    image_count: int = 0
+    pdf_count: int = 0
     combined_text_chars: int
 
 
 class ExtractResponse(BaseModel):
     request_id: str
+    graph_id: str
+    graph_name: str
     model_used: str
     entities: list[Entity]
     relations: list[Relation]
@@ -57,3 +61,42 @@ class ExtractResponse(BaseModel):
     json_output: str
     source_summary: SourceSummary
     debug: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphItem(BaseModel):
+    id: str
+    name: str
+    json_output: str
+    created_at: str
+    size: int
+    model_name: str = ""
+
+
+class GraphDetailResponse(BaseModel):
+    graph: GraphItem
+    data: dict[str, Any]
+
+
+class QARequest(BaseModel):
+    graph_id: str = Field(..., description="Graph filename or output path")
+    question: str
+    model_name: str = "gpt-4.1-mini"
+    api_key: str | None = None
+    base_url: str | None = None
+    qa_prompt: str | None = None
+
+
+class QAEvidence(BaseModel):
+    subject: str
+    predicate: str
+    object: str
+
+
+class QAResponse(BaseModel):
+    graph_id: str
+    question: str
+    answer: str
+    mode: str
+    used_model: str = ""
+    evidence: list[QAEvidence] = Field(default_factory=list)
+    context_preview: str = ""

@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
@@ -21,11 +22,13 @@ OUTPUT_DIR = PROJECT_ROOT / "output"
 
 class KGState(TypedDict, total=False):
     text: str
-    image_bytes: bytes | None
-    pdf_bytes: bytes | None
+    image_bytes_list: list[bytes]
+    pdf_bytes_list: list[bytes]
     model_name: str
     api_key: str | None
     base_url: str | None
+    custom_prompt: str | None
+    graph_name: str | None
 
     ingested_texts: list[str]
     combined_text: str
@@ -36,6 +39,15 @@ class KGState(TypedDict, total=False):
     output_path: str
 
 
+def _sanitize_graph_name(name: str | None) -> str:
+    raw = (name or "").strip()
+    if not raw:
+        return ""
+    safe = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "_", raw)
+    safe = safe.strip("_")
+    return safe[:48]
+
+
 def ingest_node(state: KGState) -> KGState:
     texts: list[str] = []
     warnings = list(state.get("warnings", []))
@@ -44,40 +56,46 @@ def ingest_node(state: KGState) -> KGState:
     if text:
         texts.append(text)
 
-    pdf_bytes = state.get("pdf_bytes")
-    if pdf_bytes:
+    pdf_bytes_list = state.get("pdf_bytes_list", [])
+    for idx, pdf_bytes in enumerate(pdf_bytes_list, start=1):
+        if not pdf_bytes:
+            continue
         try:
             pdf_text = extract_text_from_pdf_bytes(pdf_bytes)
             if pdf_text:
                 texts.append(pdf_text)
             else:
-                warnings.append("PDF未提取到有效文本")
+                warnings.append(f"第{idx}个PDF未提取到有效文本")
         except Exception as exc:
-            warnings.append(f"PDF解析失败: {exc}")
+            warnings.append(f"第{idx}个PDF解析失败: {exc}")
 
-    image_bytes = state.get("image_bytes")
-    if image_bytes:
+    image_bytes_list = state.get("image_bytes_list", [])
+    for idx, image_bytes in enumerate(image_bytes_list, start=1):
+        if not image_bytes:
+            continue
+
         image_text = extract_text_from_image_ocr(image_bytes)
         if image_text:
             texts.append(image_text)
+            continue
+
+        api_key = (state.get("api_key") or "").strip()
+        if api_key:
+            try:
+                vision_text = extract_text_from_image_vision(
+                    image_bytes=image_bytes,
+                    model_name=state.get("model_name", "gpt-4.1-mini"),
+                    api_key=api_key,
+                    base_url=state.get("base_url"),
+                )
+                if vision_text:
+                    texts.append(vision_text)
+                else:
+                    warnings.append(f"第{idx}张图片视觉识别未提取到文本")
+            except Exception as exc:
+                warnings.append(f"第{idx}张图片视觉识别失败: {exc}")
         else:
-            api_key = (state.get("api_key") or "").strip()
-            if api_key:
-                try:
-                    vision_text = extract_text_from_image_vision(
-                        image_bytes=image_bytes,
-                        model_name=state.get("model_name", "gpt-4.1-mini"),
-                        api_key=api_key,
-                        base_url=state.get("base_url"),
-                    )
-                    if vision_text:
-                        texts.append(vision_text)
-                    else:
-                        warnings.append("图片视觉识别未提取到文本")
-                except Exception as exc:
-                    warnings.append(f"图片视觉识别失败: {exc}")
-            else:
-                warnings.append("图片OCR不可用且未提供API Key，已跳过图片内容")
+            warnings.append(f"第{idx}张图片OCR不可用且未提供API Key，已跳过图片内容")
 
     return {
         "ingested_texts": texts,
@@ -109,6 +127,7 @@ def extract_node(state: KGState) -> KGState:
                 model_name=state.get("model_name", "gpt-4.1-mini"),
                 api_key=api_key,
                 base_url=state.get("base_url"),
+                custom_prompt=state.get("custom_prompt"),
             )
             return {
                 "raw_extraction": raw,
@@ -137,10 +156,26 @@ def validate_node(state: KGState) -> KGState:
 def save_node(state: KGState) -> KGState:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = OUTPUT_DIR / f"kg_{timestamp}.json"
+    graph_name = _sanitize_graph_name(state.get("graph_name"))
+
+    if graph_name:
+        filename = f"kg_{graph_name}_{timestamp}.json"
+    else:
+        filename = f"kg_{timestamp}.json"
+
+    path = OUTPUT_DIR / filename
+
+    payload = dict(state.get("validated_output", {}))
+    payload["__meta"] = {
+        "graph_name": state.get("graph_name") or "",
+        "model_name": state.get("model_name") or "",
+        "base_url": state.get("base_url") or "",
+        "custom_prompt": state.get("custom_prompt") or "",
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
 
     with path.open("w", encoding="utf-8") as f:
-        json.dump(state.get("validated_output", {}), f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
     return {"output_path": str(path)}
 
@@ -169,20 +204,24 @@ PIPELINE = build_workflow()
 def run_kg_workflow(
     *,
     text: str,
-    image_bytes: bytes | None,
-    pdf_bytes: bytes | None,
+    image_bytes_list: list[bytes],
+    pdf_bytes_list: list[bytes],
     model_name: str,
     api_key: str | None,
     base_url: str | None,
+    custom_prompt: str | None,
+    graph_name: str | None,
 ) -> dict[str, Any]:
     final_state = PIPELINE.invoke(
         {
             "text": text,
-            "image_bytes": image_bytes,
-            "pdf_bytes": pdf_bytes,
+            "image_bytes_list": image_bytes_list,
+            "pdf_bytes_list": pdf_bytes_list,
             "model_name": model_name,
             "api_key": api_key,
             "base_url": base_url,
+            "custom_prompt": custom_prompt,
+            "graph_name": graph_name,
             "warnings": [],
         }
     )
